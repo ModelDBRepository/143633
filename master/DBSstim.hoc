@@ -1,0 +1,1025 @@
+//Cameron McIntyre//
+//TC neuron (3-D dendritic tree)//
+//NEURON 5.3 (windows version)//
+//March 2003//
+//
+// M. Birdno switched to TC with axonal inputs from Reticular nucleus, thalamic interneurons, 
+// cerebellum and cortex.
+// February 2008 //
+
+
+load_file("nrngui.hoc")					// start Neuron environment
+
+objref dftc, tktc, gkfile, K56file, LKfile, vshfile, wtfile
+dftc = new File()
+dftc.ropen("depth.txt")
+depth_soma = dftc.scanvar() // 
+depth_ax = dftc.scanvar() // 
+dftc.close()
+
+tktc = new File()
+tktc.ropen("Tauk.txt")
+tauk = tktc.scanvar()
+taukFactor = tktc.scanvar()
+tktc.close()
+
+gkfile = new File()
+gkfile.ropen("gkfactor.txt")
+gKfactor = gkfile.scanvar()
+gkfile.close()
+
+K56file = new File()
+K56file.ropen("K56.txt")
+k5 = K56file.scanvar()
+k6 = K56file.scanvar()
+K56file.close()
+
+LKfile = new File()
+LKfile.ropen("Lkparams.txt")
+gKL = LKfile.scanvar()
+minc = LKfile.scanvar()
+tau_m = LKfile.scanvar()
+LKfile.close()
+
+vshfile = new File()
+vshfile.ropen("vsh.txt")
+vsh_incr = vshfile.scanvar()
+tau_vsh = vshfile.scanvar()
+vshfile.close()
+
+wtfile = new File()
+wtfile.ropen("weight.txt")
+mdlwt = wtfile.scanvar()
+mdltau1 = wtfile.scanvar()
+mdltau2 = wtfile.scanvar()
+wtfile.close()
+
+
+
+func depax() { return depth_ax }
+func findTauk() { return tauk }
+func getTaukFac() { return taukFactor }
+func getgK() {return gKfactor }
+
+objref fin
+fin = new File()
+fin.ropen("nk")
+n_kin = fin.scanvar() // number of �children� in each generation of genetic algorithm
+tstop_nk = fin.scanvar()
+del_t = fin.scanvar()
+gabaa_RN = fin.scanvar()
+gabab_RN = fin.scanvar()
+gabaa_TIN = fin.scanvar()
+gabab_TIN = fin.scanvar()
+nc = fin.scanvar()
+fin.close()
+tstop = tstop_nk
+TSTOP = tstop // 1000 msec	Final Stop of Run
+dt = del_t
+
+objref STIMvec[n_kin], STIM, stim_file, file_names
+strdef filename
+
+file_names = new File()
+file_names.ropen("stim_files.dat")
+stim_file = new File()
+n_stim = n_kin-1
+STIMvec[n_stim] = new Vector(TSTOP/dt, 0)
+file_names.scanstr(filename)
+
+strdef simdir
+simdir = getcwd()
+
+/////////////////////	GO TO MASTER DIRECTORY  	////////////////////////
+chdir("../master/")
+////////////////////////////////////////////////////////////////////////////
+
+stim_file.ropen(filename)
+STIMvec[n_stim].fread(stim_file,TSTOP/dt,4)
+stim_file.close()
+file_names.close()
+
+STIM = new Vector(TSTOP/dt,0)
+
+
+load_file("TCmodel_short30mb.hoc")
+load_file("Axon_template_30nodes.hoc")
+load_file("Axon_template_15nodes.hoc")
+
+
+proc stim_params(){
+	Vstim = 7.5 	//V//    //stimulation amplitude 
+	istim = 5    //mA//     //stimulation current 
+	polarity = -1   // -1 for cathodic stimulus, +1 for anodic 
+        ratio = 10      // second pulse has amplitude amp/ratio and duration pw*ratio (it is the first pulse for asymmetric stimuli)  
+        pw=0.09	//msec//   //pulse width for exIClmp (psmonoIClamp)
+    delay=0	//msec//   //delay for exIClmp and syntrainGABA and syntrainGLU trainIClamp
+	exc_offset = 0 //msec // 10 for PD //	10 for normal //	0 for HFS //
+	duration = 1000000 //msec//   //duration for exIClmp and syntrainGABA and syntrainGLU trainIClamp
+	frequency = 130	//65	//Hz//     //frequency for exIClmp and syntrainGABA and syntrainGLU trainIClamp
+	my_elem = 252   //index number of element where the elecrode is, 252 for soma1, 264 for node7, 271 for node14, 382 for node125
+
+noise_var = 5 // 5, nA
+
+	dt=0.01		//msec//
+	steps_per_ms=5
+	Dt = 0.1
+	measure_delay = 100
+
+	rhoe=5e6 //Ohm-um//   //resistivity of extracellular medium 
+
+	xelec = 1000   //position of point source electrode
+	yelec = 500
+	zelec = 500
+        
+}
+stim_params()
+
+
+proc syn_params() {
+    /* Synapses parameters ---------------------------*/
+	/*												  */
+	synstim=-15 //-15 //nA//  (-2) (-15) //amplitude for syntrainGABA and syntrainGLU trainIClamp
+	synpw=1	 	//msec// (1) (0.1)  //pulse width for syntrainGABA and syntrainGLU trainIClamp
+		
+	/* Synapses and Stimulation parameters -----------*/
+	/*												  */
+	delay1	   = delay		// msec - delay for syntrainGABA and syntrainGLU trainIClamp
+	duration1  = duration   // msec - duration for syntrainGABA and syntrainGLU trainIClamp
+	frequency1 = frequency	// Hz   - frequency for syntrainGABA and syntrainGLU trainIClamp
+}
+/*--------------------------------------------------- End Procedure */
+syn_params()
+
+//		INPUT AXONS to TC cell						
+objref RN, TIN, CER, CTX
+
+RN = new tcaxon30()
+TIN = new tcaxon15()
+CER = new tcaxon30()
+CTX = new tcaxon30()
+
+objref VeTC[100], VeRN[100], VeTIN[100], VeCER[100], VeCTX[100]
+VeTC=new Vector(total,0)
+VeRN=new Vector(RN.tcaxtotal,0)
+VeTIN=new Vector(TIN.tcaxtotal,0)
+VeCER=new Vector(RN.tcaxtotal,0)
+VeCTX=new Vector(RN.tcaxtotal,0)
+
+objref HarmalineIN, PoissonIN, CERtoTIN, CTXtoTIN, CTXtoRN, TCtoRN
+objref exIClmp[4]		// pointer to current clamp input for stimulation electrode
+objref inIClmp		// pointer to current clamp input for intracellular stimulation
+
+//calculate extracellular voltages for every segment
+//V = i*ro / (4*PI*r), where i is stimulating current, ro is resisitvity of extracellular medium,
+//and r is x,y,z position of segment.
+//current must be converted from nanoAmps to to milliAmps   
+
+objref VeALL[100],phi_file, str_file, drop_file, Drop_ax[100], Drop_all
+strdef filename
+phi_file = new File()
+str_file = new File()
+drop_file = new File()
+Drop_all = new Vector(500,1)
+str_file.ropen("phi_pop1_filenames.dat")
+drop_file.ropen("Drop_ax1.dat")
+Drop_all.fread(drop_file,500,4)
+drop_file.close()
+
+CER_el = 233 // # compartments in CER axon
+CTX_el = 233 // # compartments in CTX axon
+RN_el = 233 // # compartments in RN axon
+TIN_el = 113 // # compartments in TIN axon
+NTOT = total+CER_el+CTX_el+RN_el+TIN_el // total # of compartments in TC, RN, TIN, CER, and CTX combined
+for n_cell = 0,99 {
+	VeALL[n_cell] = new Vector(NTOT, 0)
+	VeTC[n_cell] = new Vector(total, 0)
+	VeCER[n_cell] = new Vector(CER_el, 0)
+	VeCTX[n_cell] = new Vector(CTX_el, 0)
+	VeRN[n_cell] = new Vector(RN_el, 0)
+	VeTIN[n_cell] = new Vector(TIN_el, 0)
+	str_file.scanstr(filename)
+	
+	phi_file.ropen(filename)
+	VeALL[n_cell].fread(phi_file,NTOT,4)
+	phi_file.close()
+	
+	Drop_ax[n_cell] = new Vector(5,1)
+	for ne=0,4 {
+		Drop_ax[n_cell].x[ne]=Drop_all.x[n_cell*5+ne] 
+	}
+	
+   for ne=0,total-1 {     
+	   VeTC[n_cell].x[ne]=VeALL[n_cell].x[ne]
+   }
+   
+   for ne=0,CER_el-1 {
+	   VeCER[n_cell].x[ne]=VeALL[n_cell].x[ne+total]
+	   VeCTX[n_cell].x[ne]=VeALL[n_cell].x[ne+total+CER_el]
+	   VeRN[n_cell].x[ne]=VeALL[n_cell].x[ne+total+CER_el+CTX_el]
+   }
+   
+   for ne=0,TIN_el-1 {
+	   VeTIN[n_cell].x[ne]=VeALL[n_cell].x[ne+total+CER_el+CTX_el+RN_el]
+   }
+
+}
+str_file.close()
+
+
+
+///* Presynapses creation and initialization -------------------------*/
+///*                                                                    */
+///* Presynaptic cells are endowed with current clamp processes to  */
+///* simulate the synaptic activation.                              */
+///*                                                                    */
+///* Procedure: presyn_stim()                                           */
+///*          IN: no input. Previously defined variables are invoked    */
+///*         OUT: no returnig variable. Global variables are updated    */
+///*------------------------------------------------------------------*/
+
+
+//////////////////////////<- To add synapses remove here            
+objref GLUsynAMPA[CERsynapses+CTXsynapses]   // pointer to AMPA-mediated synaptic currents
+objref GLUsynNMDA[CERsynapses+CTXsynapses]   // pointer to NMDA-mediated synaptic currents
+objref GABAsynA[GABAsynapses] // pointer to GABAA-mediated synaptic currents
+objref GABAsynB[GABAsynapses] // pointer to GABAB-mediated synaptic currents
+//
+
+objref HARM, harm_file, POISSON, poisson_file, HARMdel, harmdel_file, POISSONdel, poissondel_file
+
+harm_file = new File()
+HARM = new Vector(TSTOP/dt,0)
+harm_file.ropen("Harmaline.dat")
+HARM.fread(harm_file,TSTOP/dt,4)
+harm_file.close()
+
+poisson_file = new File()
+POISSON = new Vector(TSTOP/dt,0)
+poisson_file.ropen("Poisson.dat")
+POISSON.fread(poisson_file,TSTOP/dt,4)
+poisson_file.close()
+
+proc presyn_stim() { local i
+
+	CER.tcaxnode[0] {
+		HarmalineIN = new IClamp(0.5)
+		HarmalineIN.del = 0
+		HarmalineIN.amp = 0
+		HarmalineIN.dur = TSTOP
+		HARM.play(&HarmalineIN.amp,dt)
+	}
+	
+	CTX.tcaxnode[0] {
+		PoissonIN = new IClamp(0.5)
+		PoissonIN.del = 0
+		PoissonIN.amp = 0
+		PoissonIN.dur = TSTOP
+		POISSON.play(&PoissonIN.amp,dt)
+	}
+}
+
+///*----------------------------------------------------End Procedure */
+//
+//
+//
+///* Presynapses - Synapses connection -------------------------------*/
+///*                                                                    */
+///* Connections between presynaptic and TC neurons are established */
+///*                                                                    */
+///* Procedure: syn_connect()                                           */
+///*          IN: no input. Previously defined variables are invoked    */
+///*         OUT: no returnig variable. Global variables are updated    */
+///*------------------------------------------------------------------*/
+//////////////////////////<- To add synapses remove here            
+CER_AMPA_GMAX=CERsynAMPAg*2 // *1.5
+CER_NMDA_GMAX=CERsynNMDAg*2 // *1.5
+CTX_AMPA_GMAX=CTXsynAMPAg*4 // *3.5
+CTX_NMDA_GMAX=CTXsynNMDAg*4 // *3.5
+RN_GABAA_GMAX=gabaa_RN
+RN_GABAB_GMAX=gabab_RN
+TIN_GABAA_GMAX=gabaa_TIN
+TIN_GABAB_GMAX=gabab_TIN
+GABAB_NSM=1
+
+objref ncon
+access dend[0]
+ncon = new NetCon(&stimon_tcleakdepol(0.5), modyn, 0.5, 0, mdlwt)
+
+
+proc syn_connect() { local i
+  for i=0,CERsynapses-1 {        // Each section endowed with AMPA synapses
+                              // receives AMPA-mediated currents induced
+                              // by the voltage of GLUpre membrane
+      sCER[i].sec {
+      
+          GLUsynAMPA[i]=new AMPAcer()
+          GLUsynAMPA[i].loc(.5)
+          setpointer GLUsynAMPA[i].pre, CER.tcaxnode[axonnodes-1].v(0.5)
+          GLUsynAMPA[i].gmax=CER_AMPA_GMAX
+
+      }
+  }
+  
+  for i=CERsynapses,CERsynapses+CTXsynapses-1 {        // Each section endowed with AMPA synapses
+                              // receives AMPA-mediated currents induced
+                              // by the voltage of GLUpre membrane
+      sCTX[i-CERsynapses].sec {
+      
+          GLUsynAMPA[i]=new AMPActx()
+          GLUsynAMPA[i].loc(.5)
+          setpointer GLUsynAMPA[i].pre, CTX.tcaxnode[axonnodes-1].v(0.5)
+          GLUsynAMPA[i].gmax=CTX_AMPA_GMAX
+
+      }
+  }
+
+//  
+  for i=0,CERsynapses-1 {        // Each section endowed with NMDA synapses
+                              // receives NMDA-mediated currents induced
+                              // by the voltage of GLUpre membrane
+      sCER[i].sec {
+      
+          GLUsynNMDA[i]=new NMDAcer()
+          GLUsynNMDA[i].loc(.5)
+          setpointer GLUsynNMDA[i].pre, CER.tcaxnode[axonnodes-1].v(0.5)
+          GLUsynNMDA[i].gmax=CER_NMDA_GMAX
+
+      }
+  }
+  for i=CERsynapses,CERsynapses+CTXsynapses-1 {        // Each section endowed with NMDA synapses
+                              // receives NMDA-mediated currents induced
+                              // by the voltage of GLUpre membrane
+      sCTX[i-CERsynapses].sec {
+      
+          GLUsynNMDA[i]=new NMDActx()
+          GLUsynNMDA[i].loc(.5)
+          setpointer GLUsynNMDA[i].pre, CTX.tcaxnode[axonnodes-1].v(0.5)
+          GLUsynNMDA[i].gmax=CTX_NMDA_GMAX
+
+      }
+  }
+
+
+  for(i=0; i<=GABAsynapses-1; i=i+2){
+	//for i=0,GABAsynapses-1 {    // Each section endowed with GABAergic synapses
+                              // receives GABAA- and GABAB-mediated currents
+                              // induced by the voltage of GABApre membrane
+      sGABA[i].sec {
+          GABAsynA[i]=new GABAa()
+          GABAsynA[i].loc(.5)
+          setpointer GABAsynA[i].pre, RN.tcaxnode[axonnodes-1].v(0.5)
+          GABAsynA[i].gmax=RN_GABAA_GMAX //GABAsynAg  // MB divided by 10 to prevent too much recurrent inhibition from TC-->RN-->TC
+
+          GABAsynB[i]=new GABAbKG()
+          GABAsynB[i].loc(.5)
+          setpointer GABAsynB[i].pre, RN.tcaxnode[axonnodes-1].v(0.5)
+          setpointer GABAsynB[i].vext, s[0].sec.e_extracellular(0.5)
+          setpointer GABAsynB[i].pmodyn, modyn.i
+          GABAsynB[i].gmax=RN_GABAB_GMAX // GABAsynBg  //   /15
+          GABAsynB[i].K5=k5
+          GABAsynB[i].K6=k6
+          GABAsynB[i].nsm=GABAB_NSM
+      }
+  }
+  for(i=1; i<=GABAsynapses-1; i=i+2){
+      sGABA[i].sec {
+          GABAsynA[i]=new GABAa()
+          GABAsynA[i].loc(.5)
+          setpointer GABAsynA[i].pre, TIN.tcaxnode[TIN.tcaxonnodes-1].v(0.5)
+          GABAsynA[i].gmax=TIN_GABAA_GMAX //GABAsynAg*2.25		// MB divided by 2 to get appropriate freq. response
+          
+          GABAsynB[i]=new GABAbKG()
+          GABAsynB[i].loc(.5)
+          setpointer GABAsynB[i].pre, TIN.tcaxnode[TIN.tcaxonnodes-1].v(0.5)
+          setpointer GABAsynB[i].vext, s[0].sec.e_extracellular(0.5)
+          setpointer GABAsynB[i].pmodyn, modyn.i
+          GABAsynB[i].gmax=TIN_GABAB_GMAX // GABAsynBg*5 //*2
+          GABAsynB[i].K5=k5
+          GABAsynB[i].K6=k6
+          GABAsynB[i].nsm=GABAB_NSM
+      }
+   }
+
+	RN.tcaxnode[0] {
+		TCtoRN = new FakeExcSyn()
+		TCtoRN.loc(0.5)
+		setpointer TCtoRN.pre, node[axonnodes-1].v(0.5)
+		TCtoRN.delay = 1.2 //?
+		
+		CTXtoRN = new FakeExcSyn()
+		CTXtoRN.loc(0.5)
+		setpointer CTXtoRN.pre, CTX.tcaxnode[15].v(0.5)
+		CTXtoRN.delay = 1.2*(15/60) + 0.6 + 0.3// ??1.2*(15/60) // 15/60  * 1.2 is propagation time from node 15 down to node 30
+		
+	}
+
+	TIN.tcaxnode[0] {
+		CTXtoTIN = new FakeExcSyn()
+		CTXtoTIN.loc(0.5)
+		setpointer CTXtoTIN.pre, CTX.tcaxnode[20].v(0.5) // use a node that is closer to TC cell than for RN inputs because bifurcation to TIN is likely closer.
+		CTXtoTIN.delay = 1.2*(10/60) + 0.6 + 0.1 // ??1.2*(10/60) // 10/60  * 1.2 is propagation time from node 20 down to node 30
+		
+		CERtoTIN = new FakeExcSyn()
+		CERtoTIN.loc(0.5)
+		setpointer CERtoTIN.pre, CER.tcaxnode[20].v(0.5)
+		CERtoTIN.delay = 1.2*(10/60) + 0.6 + 0.1 // ??1.2*(10/60) // 10/60  * 1.2 is propagation time from node 20 down to node 30
+	}
+	
+	
+
+}
+
+
+//
+///////////////////////////////////////////////////////////////////////////////////
+//
+///* Running Initialization -------------------------*/
+///*                                                   */
+initcell()
+finitialize(v_init)
+fcurrent()
+presyn_stim()
+syn_connect()
+ki = 106
+
+xopen("plotnewG.ses")
+tstop = TSTOP // 1000 msec	Final Stop of Run
+dt = del_t
+
+cadv = 1000*polarity*Vstim
+
+proc advance(){
+	cadv2 = cadv*(STIM.x[t/dt])
+	for i=0,total-1 {
+				// Multiply by 1000 to turn V into mV      
+	  s[i].sec.e_extracellular(0.5)=cadv2*VeTC[kk].x[i]    //mV//
+	}
+	for i=0,RN.tcaxtotal-1 {
+      RN.s[i].sec.e_extracellular(0.5)=cadv2*VeRN[kk].x[i]    //mV
+      CTX.s[i].sec.e_extracellular(0.5)=cadv2*VeCTX[kk].x[i]    //mV//
+      CER.s[i].sec.e_extracellular(0.5)=cadv2*VeCER[kk].x[i]    //mV//
+	}
+	for i=0,TIN.tcaxtotal-1 {
+      TIN.s[i].sec.e_extracellular(0.5)=cadv2*VeTIN[kk].x[i]    //mV//
+	}
+	
+  fadvance()
+}
+
+///*--------------------------------------------------- End Procedure */
+
+
+///* Addition of Noise to soma ---------------------*/
+///*                                                   */
+objref stimnoise, ran, vrecn, vrecax
+rand_seed = startsw()
+ran = new Random(rand_seed)
+
+ran.normal(0,noise_var)                   // Noise has normal distribution with mean = 0 and variance = 6
+soma[1] {
+  stimnoise = new IClamp(0.5)
+  stimnoise.del = 0
+  stimnoise.dur = 1e9
+  ran.play(&stimnoise.amp)    // Noise is added as intra-cellular current
+}
+//
+////Extracellular current stimulus (microAmps)
+objref stim_vec
+stim_vec = new Vector (1,0)
+stim_vec.x[0] = 6     // 6 mA for anodic ~80% activation
+
+///* Recording Settings -----------------------------*/
+objref apc, apc_times, apc_soma, apc_times_soma, apc_close, apc_times_close, AP, APS, APC
+objref apc_pr_CER, apc_t_pr_CER, apc_dist_CER, apc_t_dist_CER, apc_pr_RN, apc_t_pr_RN, apc_dist_RN, apc_t_dist_RN
+objref apc_pr_CTX, apc_t_pr_CTX, apc_dist_CTX, apc_t_dist_CTX, apc_pr_TIN, apc_t_pr_TIN, apc_dist_TIN, apc_t_dist_TIN
+	
+
+node[axonnodes-1] apc = new APCount(.5)   //last node
+apc_times = new Vector()
+apc.thresh = -20 //mV
+apc.record(apc_times)
+//
+
+node[1] apc_close = new APCount(0.5)
+apc_times_close = new Vector()
+apc_close.thresh = -20  //mBV
+apc_close.record(apc_times_close)
+//
+soma[2] apc_soma = new APCount(.5)   
+apc_times_soma = new Vector()
+apc_soma.thresh = -20 //mV
+apc_soma.record(apc_times_soma)
+
+CER.tcaxnode[5] apc_pr_CER = new APCount(.5)   //prox node
+apc_t_pr_CER = new Vector()
+apc_pr_CER.thresh = -20 //mV
+apc_pr_CER.record(apc_t_pr_CER)
+//
+CER.tcaxnode[29] apc_dist_CER = new APCount(.5)   //dist node
+apc_t_dist_CER = new Vector()
+apc_dist_CER.thresh = -20 //mV
+apc_dist_CER.record(apc_t_dist_CER)
+//
+RN.tcaxnode[5] apc_pr_RN = new APCount(.5)   //prox node
+apc_t_pr_RN = new Vector()
+apc_pr_RN.thresh = -20 //mV
+apc_pr_RN.record(apc_t_pr_RN)
+//
+RN.tcaxnode[29] apc_dist_RN = new APCount(.5)   //dist node
+apc_t_dist_RN = new Vector()
+apc_dist_RN.thresh = -20 //mV
+apc_dist_RN.record(apc_t_dist_RN)
+
+CTX.tcaxnode[5] apc_pr_CTX = new APCount(.5)   //prox node
+apc_t_pr_CTX = new Vector()
+apc_pr_CTX.thresh = -20 //mV
+apc_pr_CTX.record(apc_t_pr_CTX)
+//
+CTX.tcaxnode[29] apc_dist_CTX = new APCount(.5)   //dist node
+apc_t_dist_CTX = new Vector()
+apc_dist_CTX.thresh = -20 //mV
+apc_dist_CTX.record(apc_t_dist_CTX)
+//
+TIN.tcaxnode[5] apc_pr_TIN = new APCount(.5)   //prox node
+apc_t_pr_TIN = new Vector()
+apc_pr_TIN.thresh = -20 //mV
+apc_pr_TIN.record(apc_t_pr_TIN)
+//
+TIN.tcaxnode[14] apc_dist_TIN = new APCount(.5)   //dist node
+apc_t_dist_TIN = new Vector()
+apc_dist_TIN.thresh = -20 //mV
+apc_dist_TIN.record(apc_t_dist_TIN)
+
+
+//
+///* Simulation Running Management -----------------------------------*/
+///*                                                                    */
+///* For a single 3D neuron a simulation is executed for tstop msec.  */
+///* If APs are induced the simulation will run until TSTOP         */
+///*                                                                    */
+///* Function: trial()                                              */
+///*          IN: no input                                              */
+///*         OUT: binary returned value: 1 - simulation until TSTOP     */
+///*                                     0 - simulation until tstop     */
+///*------------------------------------------------------------------*/
+func trial() {
+  presyn_stim()
+//
+        run()
+//
+        if (apc.n > 0) {
+          continuerun(TSTOP)
+             return 1
+        }
+        return 0   
+}
+///*--------------------------------------------------- End Procedure */
+//
+func find_threshold() {
+  delta = 4      // V
+  Vstim = 4       // V   
+  tstop = 7
+  TSTOP = 7
+  
+
+  
+  while (delta > 0.01) { // tolerance is +/- 20 mV
+  
+      print "Vstim = ",Vstim, ",V"
+      result = trial()
+
+      if (result == 0) {
+          Vstim = Vstim + delta
+	  } else {
+          delta /=2 
+          Vstim = Vstim - delta
+      }   
+  }
+  return Vstim
+}
+///*--------------------------------------------------- End Procedure */
+//
+////-------------------------------------------------
+num_cells = 100  //number of cells or axons in the population
+num_cells_burst = 50 // 50%
+num_cells_poiss = 20 // 20%
+num_cells_reg = 30 // 30%
+//
+
+
+/////////////////////	GO BACK TO SIMULATION DIRECTORY  	////////////////////////
+chdir(simdir)
+////////////////////////////////////////////////////////////////////////////
+
+print "Simulation running...\n"
+//
+//
+objref f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12, f13 , f14, f15, f16
+objref proxv, distv, somav
+objref gababrec, korec, ihrec, gklkrec, morec, mrec, vshrec, sgbrec, ekrec
+objref strobj
+strobj = new StringFunctions()
+strdef dat, logger, aptimes, potential_prox, potential_dist, potential_soma, thresh_f, subdir, gabastr, kostr, ihstr, gklkstr, modynstr, mstr, vshstr, sgbstr, ekstr
+subdir = getcwd()
+indrt = strobj.tail(subdir,"ModelDirectory/","x")
+strobj.right(subdir,indrt)
+howlong = strobj.len(subdir)
+strobj.left(subdir,howlong-1)
+
+sprint(dat,"%s%s%s","local_cell_",subdir,".dat")
+sprint(logger,"%s%s%s","local_cell_",subdir,".log")
+sprint(aptimes,"%s%s%s","aptimes_master_",subdir,".dat")
+sprint(potential_prox,"%s%s%s","potential_prox_",subdir,".dat")
+sprint(potential_dist,"%s%s%s","potential_dist_",subdir,".dat")
+sprint(potential_soma,"%s%s%s","potential_soma_",subdir,".dat")
+sprint(thresh_f,"%s%s%s","thresholds_",subdir,".dat")
+sprint(gabastr,"%s%s%s","IGabaB_",subdir,".dat")
+sprint(kostr,"%s%s%s","Ko",subdir,".dat")
+sprint(ihstr,"%s%s%s","Ih",subdir,".dat")
+sprint(gklkstr,"%s%s%s","IkLk",subdir,".dat")
+sprint(modynstr,"%s%s%s","Imodyn_",subdir,".dat")
+sprint(mstr,"%s%s%s","IkLk_m",subdir,".dat")
+sprint(vshstr,"%s%s%s","Ih_vsh_",subdir,".dat")
+sprint(sgbstr,"%s%s%s","IGbabaB_s_",subdir,".dat")
+sprint(ekstr,"%s%s%s","Iek_",subdir,".dat")
+
+//
+f1 = new File()
+f2 = new File()
+f3 = new File()
+f4 = new File()
+f5 = new File()
+f6 = new File()
+f7 = new File()
+f8 = new File()
+f9 = new File()
+f10 = new File()
+f11 = new File()
+f12 = new File()
+f13 = new File()
+f14 = new File()
+f15 = new File()
+f16 = new File()
+
+//
+somav = new Vector(TSTOP/Dt,0)
+proxv = new Vector(TSTOP/Dt,0)
+distv = new Vector(TSTOP/Dt,0)
+gababrec = new Vector(TSTOP/Dt,0)
+korec = new Vector(TSTOP/Dt,0) 
+ihrec = new Vector(TSTOP/Dt,0)
+gklkrec = new Vector(TSTOP/Dt,0)
+morec = new Vector(TSTOP/Dt,0)
+mrec = new Vector(TSTOP/Dt,0) 
+vshrec = new Vector(TSTOP/Dt,0)
+sgbrec = new Vector(TSTOP/Dt,0)
+ekrec = new Vector(TSTOP/Dt,0)
+
+//
+somav.record(&soma[2].v(0.5), Dt)
+proxv.record(&node[1].v(0.5), Dt)
+distv.record(&node[axonnodes-1].v(0.5), Dt)
+korec.record(&soma[2].ko(0.5),Dt)
+ekrec.record(&soma[2].ek(0.5),Dt)
+//
+//
+//
+////main loop of the program...cycles thru frequencies, electrode-to-neuron distances and pulse widths
+objref cells_excited, cell_thresh        //indices of cells that were excited 
+cells_excited=new Vector(num_cells,-1)
+cell_thresh=new Vector(num_cells,0)
+exc_count=0
+
+objref apc_file_names, apc_file
+apc_file_names = new File()
+apc_file_names.ropen("apc_names.dat")
+apc_file = new File()
+strdef apfilename
+
+for pp =  0,0 {   //0 to 15
+//  
+//  
+  f1.aopen(dat)
+  f2.aopen(logger)
+  f3.aopen(aptimes)
+  f4.aopen(thresh_f)
+  f5.aopen(potential_soma)
+  f6.aopen(potential_prox)
+  f7.aopen(potential_dist)
+//  f8.aopen(gabastr)
+//  f9.aopen(kostr)
+  //  
+  f1.printf("\n\n----------------------   NEW RUN   ------------------\n\n\n\n")
+  f2.printf("\n\n----------------------   NEW RUN   ------------------\n\n\n\n")
+  f3.printf("\n\n----------------------   NEW RUN   ------------------\n\n\n\n")
+  f4.printf("\n\n----------------------   NEW RUN   ------------------\n\n\n\n")
+  f5.printf("\n\n----------------------   NEW RUN   ------------------\n\n\n\n")
+  f6.printf("\n\n----------------------   NEW RUN   ------------------\n\n\n\n")
+  f7.printf("\n\n----------------------   NEW RUN   ------------------\n\n\n\n")
+//  f8.printf("\n\n----------------------   NEW RUN   ------------------\n\n\n\n")
+//  f9.printf("\n\n----------------------   NEW RUN   ------------------\n\n\n\n")
+//  
+  f1.printf("ASYMMETRIC Anodic money phase & cathodic pre-pulse stimulation of TC neuron population (soma[1]-long60)\n\n")
+  f1.printf("Other params: tstop=%f ms, dt=%f ms, steps_per_ms=%f ms, AP threshold=%f mV, number of nodes=%d\n\n", tstop, dt, steps_per_ms, apc.thresh, axonnodes)
+  f1.printf("Number of cells/axons= %d, my_elem=%d \n",num_cells, my_elem)
+  f1.printf("\nStimulus current \t #cells activated \t #activ with body to electrode \t #total with body to electrode\n")
+//  
+  f2.printf("ASYMMETRIC Anodic money phase & cathodic pre-pulse stimulation of TC neuron population (soma[1]-long160)\n\n")
+  f2.printf("Other params: tstop=%f ms, dt=%f ms, steps_per_ms=%f ms, AP threshold=%f mV, number of nodes=%d\n\n", tstop, dt, steps_per_ms, apc.thresh, axonnodes)
+  f2.printf("Number of cells/axons= %d \n", num_cells)
+//
+  f1.printf("Population %d \n",pp+1)
+  f2.printf("Population %d \n",pp+1)
+  f3.printf("Population %d \n",pp+1)
+  f4.printf("Population %d \n",pp+1)
+  f5.printf("Population %d \n",pp+1)
+  f6.printf("Population %d \n",pp+1)
+  f7.printf("Population %d \n",pp+1)
+//  f8.printf("Population %d \n",pp+1)
+//  f9.printf("Population %d \n",pp+1)
+//
+//  
+  f1.close()
+  f2.close()
+  f3.close()
+  f5.close()
+  f6.close()
+  f7.close()
+//  f8.close()
+//  f9.close()
+//  
+  f4.printf("\n Cell number \t Threshold current (mA) \n")
+  f4.close()
+//  
+//
+  for ff = 0,0 {   // 0,9  0 to 8
+//     
+//     istim = stim_vec.x[ff]      //milliAmps
+///       print "Stim_current = ", istim*polarity
+//     
+     cells_excited=new Vector(num_cells,-1)
+     exc_count=0
+//      
+      f2.aopen(logger)
+     f2.printf("\n\nStimulus current: %f\n", polarity*istim)
+//     
+     f3.aopen(aptimes)
+     f3.printf("\n\nStimulus current: %f\n", polarity*istim)
+     f3.printf("\n Stimulus Current (mA) \t Cell \t Distal AP Times \t Proximal AP Times \t Soma AP Times \n")
+     f3.close()
+//     
+//     f2.printf("\nCell# \t X \t Y \t Z \t dist\t stimulated? \t #APs node 59 \t #APs soma \t #AP post %d seconds \t #Soma AP post %d seconds \n", measure_delay, measure_delay)
+     f2.close()
+//     
+     count = 0   //how many cells are stimulated 
+     count2 = 0  //how many cells are stimulated whose cell bodies are closer to electrode (as opposed whose axons face soma) 
+     count3 = 0   //how many cells total whose cell bodies are closer to electrode (as opposed whose axons face soma) 
+     count4 = 0  //how many somas are activated
+     zero = 0
+//     
+     for kk = nc-1,nc-1 { //num_cells_burst/2-1  {  //0,num_cells-1 { // 0,29
+
+		CER_AMPA_GMAX=CERsynAMPAg*1.5
+		CER_NMDA_GMAX=CERsynNMDAg*1.5
+		CTX_AMPA_GMAX=CTXsynAMPAg*3.5
+		CTX_NMDA_GMAX=CTXsynNMDAg*3.5
+		RN_GABAA_GMAX=gabaa_RN
+		RN_GABAB_GMAX=gabab_RN
+		TIN_GABAA_GMAX=gabaa_TIN
+		TIN_GABAB_GMAX=gabab_TIN
+		GABAB_NSM=VeTC[kk].x[251]
+		syn_connect()
+          
+		
+		if (Drop_ax[kk].x[1]==0) {
+			CER_AMPA_GMAX=0
+			CER_NMDA_GMAX=0
+			syn_connect()
+			TIN.tcaxnode[0] {
+				CERtoTIN.amp=0
+			}
+		}
+		
+		if (Drop_ax[kk].x[2]==0) {
+			CTX_AMPA_GMAX=0
+			CTX_NMDA_GMAX=0
+			syn_connect()
+			TIN.tcaxnode[0] {
+				CTXtoTIN.amp=0
+			}
+			RN.tcaxnode[0] {
+				CTXtoRN.amp=0
+			}
+		}
+		
+		if (Drop_ax[kk].x[3]==0) {
+			RN_GABAA_GMAX=0
+			RN_GABAB_GMAX=0
+			syn_connect()
+		}
+		
+		if (Drop_ax[kk].x[4]==0) {
+			TIN_GABAA_GMAX=0
+			TIN_GABAB_GMAX=0
+			syn_connect()
+		}
+		
+		// Update nsm parameters in tcihshift & leakdepol mechanisms for each cell
+		for i=0,dendelements-1 {
+			dend[i] {
+				nsm_tcleakdepol=VeTC[kk].x[251]
+				nsm_tcihshift=VeTC[kk].x[251]
+			}
+		}
+
+		for i=0,somaelements-1 {
+			soma[i] {
+				nsm_tcleakdepol=VeTC[kk].x[251]
+				nsm_tcihshift=VeTC[kk].x[251]
+			}
+		}
+		
+		gababrec.record(&GABAsynB[107].i, Dt)
+		ihrec.record(&soma[2].ih_tcihshift(0.5), Dt)
+		gklkrec.record(&soma[2].iksub_tcleakdepol(0.5), Dt)
+		morec.record(&modyn.i, Dt)
+		mrec.record(&soma[2].m_tcleakdepol(0.5), Dt)
+		vshrec.record(&soma[2].vsh_tcihshift(0.5), Dt)
+		sgbrec.record(&GABAsynB[107].S, Dt)
+
+
+		for nk = n_kin-1,n_kin-1 { // nk = 0,n_kin-1 {
+                              
+			  print "Cell ",kk+1,", Stim child ",nk+1
+			  
+			  STIM = STIMvec[nk]
+			  
+
+/*			  
+			  f4.aopen(thresh_f)
+			  cell_thresh.x[kk] = find_threshold()
+			  f4.printf("%d \t %10.5f \n", kk+1, cell_thresh.x[kk])
+			  f4.close()
+*/			  
+			  f2.aopen(logger)
+
+//  UNCOMMENT THIS PIECE TO RUN STANDARD SIMULATION
+			if (Drop_ax[kk].x[0]==0) {
+				tstop = 1
+				TSTOP = 1
+				result = trial() //Only do 1 ms of this simulation, and output zero APs
+				tstop = tstop_nk
+				TSTOP = tstop // 1000 msec	Final Stop of Run
+			} else {
+				result = trial()
+			}
+			  if (result > 0) {         
+				  count = count+1
+			  }
+
+			  print "Population ", pp+1, ", Cell #", kk+1, "is ", result
+
+			  AP = new Vector()
+			  AP.where(apc_times,">",measure_delay)
+
+			  APS = new Vector()
+			  APS.where(apc_times_soma,">",measure_delay)
+
+			  f2.close()
+	//          
+			  if (apc_times.size() == 0) {
+				apc_file_names.scanstr(apfilename)
+				apc_file.wopen(apfilename)
+				apc_file.printf("%d\n",0)
+				apc_file.close()
+				
+			  }else {
+				  f3.aopen(aptimes)
+	//              
+				  n57 = apc_times.size
+				  n3  = apc_times_close.size
+				  nsoma = apc_times_soma.size
+	//              
+				  for aa = 0,n57 - 1 {
+	//                  
+					  if (n3 >= aa+1 && nsoma >= aa+1) {
+						  f3.printf("%10.3f \t %d \t %6.3f \t %6.3f \t %6.3f \t %d \n", stim_vec.x[ff], kk+1, apc_times.x[aa], apc_times_close.x[aa], apc_times_soma.x[aa], count)
+					  } else if (n3 >= aa+1 && nsoma < aa+1) {
+						  f3.printf("%10.3f \t %d \t %6.3f \t %6.3f \t %6.3f \t %d \n", stim_vec.x[ff], kk+1, apc_times.x[aa], apc_times_close.x[aa], zero, count)
+					  } else if (n3 < aa+1 && nsoma >= aa+1) { 
+						  f3.printf("%10.3f \t %d \t %6.3f \t %6.3f \t %6.3f \t %d \n", stim_vec.x[ff], kk+1, apc_times.x[aa], zero, apc_times_soma.x[aa], count)
+					  } else {
+						  f3.printf("%10.3f \t %d \t %6.3f \t %6.3f \t %6.3f \t %d \n", stim_vec.x[ff], kk+1, apc_times.x[aa], zero, zero, count)  
+					  }
+				  }
+				  
+				apc_file_names.scanstr(apfilename)
+				apc_file.wopen(apfilename)
+				apc_times.printf(apc_file,"%f\n")
+				apc_t_pr_CER.printf(apc_file,"%f\n")
+				apc_t_dist_CER.printf(apc_file,"%f\n")
+				apc_t_pr_CTX.printf(apc_file,"%f\n")
+				apc_t_dist_CTX.printf(apc_file,"%f\n")
+				apc_t_pr_RN.printf(apc_file,"%f\n")
+				apc_t_dist_RN.printf(apc_file,"%f\n")
+				apc_t_pr_TIN.printf(apc_file,"%f\n")
+				apc_t_dist_TIN.printf(apc_file,"%f\n")
+				apc_file.close()
+				  
+	//              
+				  if (n3 > n57 || nsoma > n57) {
+					  if (n3 >= nsoma) {
+						  for aa = n57, n3-1 {
+							  if (nsoma >= aa+1) {
+								  f3.printf("%10.3f \t %d \t %6.3f \t %6.3f \t %6.3f \t %d \n", stim_vec.x[ff], kk+1, zero, apc_times_close.x[aa], apc_times_soma.x[aa], count)
+							  } else {
+								  f3.printf("%10.3f \t %d \t %6.3f \t %6.3f \t %6.3f \t %d \n", stim_vec.x[ff], kk+1, zero, apc_times_close.x[aa], zero, count)
+							  }   
+						  }
+					  } else {
+	//                      
+						  for aa = n57, nsoma-1 {
+							  if (n3 >= aa+1) {
+								  f3.printf("%10.3f \t %d \t %6.3f \t %6.3f \t %6.3f \t %d \n", stim_vec.x[ff], kk+1, zero, apc_times_close.x[aa], apc_times_soma.x[aa], count)
+							  } else {
+								  f3.printf("%10.3f \t %d \t %6.3f \t %6.3f \t %6.3f \t %d \n", stim_vec.x[ff], kk+1, zero, zero, apc_times_soma.x[aa], count)
+							  }   
+						  }
+					  }
+	//                  
+				  }
+	//              
+				  f3.close()
+			  }
+			  f5.aopen(potential_soma)
+			  f6.aopen(potential_prox)
+			  f7.aopen(potential_dist)
+			  f8.aopen(gabastr)
+			  f9.aopen(kostr)
+			  f10.aopen(ihstr)
+			  f11.aopen(gklkstr)
+			  f12.aopen(modynstr)
+			  f13.aopen(mstr)
+			  f14.aopen(vshstr)
+			  f15.aopen(sgbstr)
+			  f16.aopen(ekstr)
+	//        
+			  somArea = soma[2].L * soma[2].diam * PI
+			  Ifactor = 100/somArea
+			  gababrec.mul(Ifactor)
+			  
+			  for cj=0,proxv.size - 1{
+				  f5.printf("%5.2f \t", somav.x[cj])
+				  f6.printf("%5.2f \t", proxv.x[cj])
+				  f7.printf("%5.2f \t", distv.x[cj])
+				  f8.printf("%1.8f \t", gababrec.x[cj])
+				  f9.printf("%4.5f \t", korec.x[cj])
+				  f10.printf("%1.8f \t", ihrec.x[cj])
+				  f11.printf("%1.8f \t", gklkrec.x[cj])
+				  f12.printf("%1.8f \t", morec.x[cj])
+				  f13.printf("%1.8f \t", mrec.x[cj])
+				  f14.printf("%1.8f \t", vshrec.x[cj])
+				  f15.printf("%1.8f \t", sgbrec.x[cj])
+				  f16.printf("%1.8f \t", ekrec.x[cj])
+			  }
+
+			  f5.printf("\n")
+			  f6.printf("\n")
+			  f7.printf("\n")
+			  f8.printf("\n")
+			  f9.printf("\n")
+			  f10.printf("\n")
+			  f11.printf("\n")
+			  f12.printf("\n")
+			  f13.printf("\n")
+			  f14.printf("\n")
+			  f15.printf("\n")
+			  f16.printf("\n")
+	//          
+			  f5.close()
+			  f6.close()
+			  f7.close()
+			  f8.close()
+			  f9.close()
+			  f10.close()
+			  f11.close()
+			  f12.close()
+			  f13.close()
+			  f14.close()
+			  f15.close()
+			  f16.close()
+     	}
+     }       
+//     
+     f1.aopen(dat)
+     f1.printf("%f \t %d \t %d \t%d\n", polarity*istim, count, count2, count3)
+//     
+     for ce = 0,num_cells-1 {
+          if (cells_excited.x[ce] != -1) { 
+              f1.printf("Cell %d fired", cells_excited.x[i])
+          }
+     } 
+     f1.close()
+  }
+}
